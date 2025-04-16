@@ -17,15 +17,60 @@ TOKEN_REGEX = re.compile(r'\w+|[^\w\s]')
 
 class Config:
     data_dir = "trainingData"
-    max_features = 2000
+    max_features = 200000
     sequence_length = 256
-    embedding_dim = 128
-    batch_size = 8
+    embedding_dim = 256
+    batch_size = 32
     epochs = 15
     min_line_length = 40
     file_chunk_size = 1024 * 1024
     max_workers = cpu_count() // 2
     results_filename = datetime.now().strftime("%Y%m%d_%H%M%S") + "_results.txt"
+
+class CodeClassifier(nn.Module):
+    def __init__(self, vocab_size, num_classes):
+        super().__init__()
+        self.embedding = nn.Embedding(vocab_size, Config.embedding_dim)
+        self.embed_dropout = nn.Dropout(0.3)
+        
+        self.lstm = nn.LSTM(
+            Config.embedding_dim, 
+            256, 
+            num_layers=2, 
+            bidirectional=True, 
+            batch_first=True, 
+            dropout=0.3
+        )
+        
+        self.attention = nn.Sequential(
+            nn.Linear(512, 256),
+            nn.Tanh(),
+            nn.Linear(256, 1, bias=False)
+        )
+        
+        self.classifier = nn.Sequential(
+            nn.Linear(512, 512),
+            nn.BatchNorm1d(512),
+            nn.ReLU(),
+            nn.Dropout(0.5),
+            nn.Linear(512, num_classes)
+        )
+
+    def forward(self, x):
+        embedded = self.embed_dropout(self.embedding(x))
+        
+        lstm_out, _ = self.lstm(embedded)
+        
+        attn_weights = torch.softmax(
+            self.attention(lstm_out).squeeze(-1), 
+            dim=1
+        )
+        context_vector = torch.sum(
+            lstm_out * attn_weights.unsqueeze(-1), 
+            dim=1
+        )
+        
+        return self.classifier(context_vector)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -132,19 +177,6 @@ class CodeDataset(Dataset):
         indices = [self.vocab.get(t, 1) for t in tokens]
         indices += [0] * (Config.sequence_length - len(indices))
         return torch.LongTensor(indices), label
-
-class CodeClassifier(nn.Module):
-    def __init__(self, vocab_size, num_classes):
-        super().__init__()
-        self.embedding = nn.Embedding(vocab_size, Config.embedding_dim)
-        self.gru = nn.GRU(Config.embedding_dim, 256, bidirectional=True, batch_first=True)
-        self.classifier = nn.Linear(512, num_classes)
-    
-    def forward(self, x):
-        embedded = self.embedding(x)
-        _, hidden = self.gru(embedded)
-        concatenated = torch.cat((hidden[-2], hidden[-1]), dim=1)
-        return self.classifier(concatenated)
 
 def create_data_loaders(train_files, test_files, vocab):
     train_dataset = CodeDataset(train_files, vocab)

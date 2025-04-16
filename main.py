@@ -100,28 +100,36 @@ class CodeDataset(Dataset):
     def __init__(self, file_list, vocab):
         self.file_list = file_list
         self.vocab = vocab
-    
+
     def __len__(self):
         return len(self.file_list) * 1000
-    
+
     def __getitem__(self, idx):
         file_idx = idx % len(self.file_list)
         filepath, label = self.file_list[file_idx]
         
-        with open(filepath, 'r') as file:
+        with open(filepath, 'rb') as file:
             memory_map = mmap.mmap(file.fileno(), 0, access=mmap.ACCESS_READ)
             file_size = memory_map.size()
             start_pos = random.randint(0, max(0, file_size - Config.file_chunk_size))
             
             chunk = memory_map[start_pos:start_pos+Config.file_chunk_size]
             lines = chunk.split(b'\n')
-            valid_lines = [ln.decode('utf-8').strip() for ln in lines if len(ln) >= Config.min_line_length]
-            line = random.choice(valid_lines) if valid_lines else ""
             
+            valid_lines = []
+            for ln in lines:
+                if len(ln) >= Config.min_line_length:
+                    try:
+                        decoded = ln.decode('utf-8', errors='replace').strip()
+                        valid_lines.append(decoded)
+                    except UnicodeDecodeError:
+                        continue
+            
+            line = random.choice(valid_lines) if valid_lines else ""
             memory_map.close()
         
         tokens = line.split()[:Config.sequence_length]
-        indices = [self.vocab.get(token, 1) for token in tokens]
+        indices = [self.vocab.get(t, 1) for t in tokens]
         indices += [0] * (Config.sequence_length - len(indices))
         return torch.LongTensor(indices), label
 

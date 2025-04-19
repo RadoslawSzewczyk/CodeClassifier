@@ -1,4 +1,5 @@
 import os
+import typer
 import random
 import mmap
 import heapq
@@ -13,10 +14,15 @@ import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 from sklearn.model_selection import train_test_split
 
+app = typer.Typer()
+
 TOKEN_REGEX = re.compile(r'\w+|[^\w\s]')
 
 class Config:
     data_dir = "trainingData"
+    output_dir = "outputs"
+    model_name = "code_classifier"
+    tokenizer_regex = r'\w+|[^\w\s]'
     max_features = 200000
     sequence_length = 256
     embedding_dim = 256
@@ -74,6 +80,11 @@ class CodeClassifier(nn.Module):
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+def prepare_data(build_vocab=True):
+    train_files, test_files, label_to_idx = load_file_paths()
+    vocab = build_vocabulary(train_files) if build_vocab else None
+    return train_files, test_files, vocab, label_to_idx
+
 def load_file_paths():
     file_paths = []
     label_to_idx = {}
@@ -107,7 +118,7 @@ def process_file(filepath):
                 
                 for line in lines:
                     if len(line) >= Config.min_line_length:
-                        tokens = TOKEN_REGEX.findall(line)
+                        tokens = TOKEN_REGEX.findall(line)[:Config.sequence_length]
                         for token in tokens:
                             local_counts[token] += 1
     return local_counts
@@ -173,7 +184,7 @@ class CodeDataset(Dataset):
             line = random.choice(valid_lines) if valid_lines else ""
             memory_map.close()
         
-        tokens = line.split()[:Config.sequence_length]
+        tokens = TOKEN_REGEX.findall(line)[:Config.sequence_length]
         indices = [self.vocab.get(t, 1) for t in tokens]
         indices += [0] * (Config.sequence_length - len(indices))
         return torch.LongTensor(indices), label
@@ -204,8 +215,7 @@ def evaluate(model, data_loader):
 
 def train_model():
     print("Loading data...")
-    train_files, test_files, label_to_idx = load_file_paths()
-    vocab = build_vocabulary(train_files)
+    train_files, test_files, vocab, label_to_idx = prepare_data()
     train_loader, test_loader = create_data_loaders(train_files, test_files, vocab)
     
     model = CodeClassifier(len(vocab), len(label_to_idx)).to(device)
@@ -254,5 +264,41 @@ def train_model():
     
     torch.save(model.state_dict(), 'code_classifier.pth')
 
+
+def load_trained_model(vocab, label_to_idx):
+    model = CodeClassifier(len(vocab), len(label_to_idx)).to(device)
+    model.load_state_dict(torch.load('code_classifier.pth'))
+    return model
+
+def evaluate_model():
+    train_files, test_files, vocab, label_to_idx = prepare_data()
+    _, test_loader = create_data_loaders(train_files, test_files, vocab)
+
+    model = load_trained_model(vocab, label_to_idx)
+    
+    acc = evaluate(model, test_loader)
+    print(f"Evaluation Accuracy: {acc:.4f}")
+
+def export_vocab():
+    train_files, _, vocab, _ = prepare_data()
+    
+    os.makedirs(Config.output_dir, exist_ok=True)
+    vocab_path = os.path.join(Config.output_dir, 'vocab.txt')
+    
+    with open(vocab_path, 'w', encoding='utf-8') as f:
+        for token, idx in vocab.items():
+            f.write(f"{token}\t{idx}\n")
+    print(f"Vocabulary exported to {vocab_path}")
+
+@app.command()
+def train(): train_model()
+
+@app.command()
+def evaluate(): evaluate_model()
+
+@app.command()
+def export_vocabulary(): export_vocab()
+
 if __name__ == "__main__":
-    train_model()
+    app()
+    

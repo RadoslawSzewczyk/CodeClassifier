@@ -2,3 +2,4 @@ trainingData/*
 *.pth
 *.txt
 venv
+env

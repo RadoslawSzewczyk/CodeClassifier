@@ -1,7 +1,6 @@
 import typer
 from train import train_model
 from data import export_vocab
-
 app = typer.Typer()
 
 @app.command()

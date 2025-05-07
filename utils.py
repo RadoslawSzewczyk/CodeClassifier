@@ -1,6 +1,7 @@
 import torch
 from data import load_file_paths, build_vocabulary
-
+import logging
+logging.basicConfig(level=logging.DEBUG)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 def evaluate(model, data_loader):
@@ -11,6 +12,8 @@ def evaluate(model, data_loader):
     with torch.no_grad():
         for inputs, labels in data_loader:
             inputs, labels = inputs.to(device), labels.to(device)
+            logging.debug(f"Inputs: {inputs}")
+            logging.debug(f"Labels: {labels}")
             outputs = model(inputs)
             _, predicted = torch.max(outputs, 1)
             total += labels.size(0)

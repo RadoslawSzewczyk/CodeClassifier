@@ -8,7 +8,7 @@ def evaluate(model, data_loader):
     model.eval()
     correct = 0
     total = 0
-    
+
     with torch.no_grad():
         for inputs, labels in data_loader:
             inputs, labels = inputs.to(device), labels.to(device)

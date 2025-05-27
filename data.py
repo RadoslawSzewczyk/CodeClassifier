@@ -12,11 +12,33 @@ from torch.utils.data import DataLoader
 from multiprocessing import Pool, cpu_count
 import json
 from collections import defaultdict
-from config import Config
+from config import Config, debugLevel
 import logging
 
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=debugLevel)
 TOKEN_REGEX = re.compile(r'\w+|[^\w\s]')
+
+def processSpecialCharsAndKeyWords(input_path: str):
+    with open('key_words', 'r', encoding='utf-8') as kw:
+        keywords = set(line.strip().lower() for line in kw if line.strip())
+
+    specials = [kw for kw in keywords if re.search(r'\W', kw)]
+    specials.sort(key=len, reverse=True)
+    token_pattern = re.compile(
+        r"(?:" + "|".join(re.escape(op) for op in specials) + r")" +
+        r"|\w+"
+    )
+
+    with open(input_path, 'r', encoding='utf-8') as fin, \
+         open('filtered_output.txt', 'w', encoding='utf-8') as fout:
+
+        for line in fin:
+            tokens = [m.group(0) for m in token_pattern.finditer(line.lower())]
+            kept   = [t for t in tokens if t in keywords]
+            fout.write(" ".join(kept) + "\n")
+
+    logging.info(f"processSpecialCharsAndKeyWords: done → filtered_output.txt (from {input_path})")
+
 
 def load_file_paths():
     file_paths = []
@@ -30,7 +52,7 @@ def load_file_paths():
                 label_to_idx[label] = idx_counter
                 idx_counter += 1
             file_paths.append((os.path.join(Config.data_dir, filename), label_to_idx[label]))
-
+    print(label_to_idx)
     labels = [lbl for _, lbl in file_paths]
     label_counts = Counter(labels)
 
@@ -105,50 +127,48 @@ def build_vocabulary(files):
 
 class CodeDataset(Dataset):
     def __init__(self, file_list, vocab):
-        self.file_list = file_list
-        self.vocab = vocab
+        self.samples = []
+        for filepath, label in file_list:
+            with open(filepath, 'r', encoding='utf-8') as f:
+                lines = []
+                for line in f:
+                    if len(line) >= Config.min_line_length:
+                        tokens = TOKEN_REGEX.findall(line)[:Config.sequence_length]
+                        ids = [vocab.get(t, vocab["<unk>"]) for t in tokens]
+                        ids += [vocab["<pad>"]] * (Config.sequence_length - len(ids))
+                        lines.append((torch.LongTensor(ids), label))
+                    if len(lines) >= Config.train_lines:
+                        break
+            self.samples.extend(lines)
 
     def __len__(self):
-        return len(self.file_list) * 1000
+        return len(self.samples)
 
     def __getitem__(self, idx):
-        file_idx = idx % len(self.file_list)
-        filepath, label = self.file_list[file_idx]
-
-        with open(filepath, 'rb') as f:
-            mmap_obj = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
-            raw_lines = mmap_obj.read().split(b'\n')
-            mmap_obj.close()
-
-        valid = []
-        for ln in raw_lines:
-            if len(valid) >= Config.train_lines:
-                break
-            if len(ln) >= Config.min_line_length:
-                try:
-                    valid.append(ln.decode('utf-8', errors='replace').strip())
-                except UnicodeDecodeError:
-                    continue
-
-        if valid:
-            line_idx = (idx // len(self.file_list)) % len(valid)
-            line = valid[line_idx]
-        else:
-            line = ""
-
-        tokens = TOKEN_REGEX.findall(line)[:Config.sequence_length]
-        indices = [self.vocab.get(t, self.vocab.get("<unk>")) for t in tokens]
-        indices += [self.vocab.get("<pad>")] * (Config.sequence_length - len(indices))
-        return torch.LongTensor(indices), label
+        return self.samples[idx]
 
 def create_data_loaders(train_files, test_files, vocab):
-    train_dataset = CodeDataset(train_files, vocab)
-    test_dataset = CodeDataset(test_files, vocab)
-    
-    return (
-        DataLoader(train_dataset, batch_size=Config.batch_size, shuffle=True, pin_memory=True),
-        DataLoader(test_dataset, batch_size=Config.batch_size, shuffle=False, pin_memory=True)
-    )
+    train_loader = None
+    if train_files:
+        train_ds = CodeDataset(train_files, vocab)
+        train_loader = DataLoader(
+            train_ds,
+            batch_size=Config.batch_size,
+            shuffle=True,
+            pin_memory=True
+        )
+
+    test_loader = None
+    if test_files:
+        test_ds = CodeDataset(test_files, vocab)
+        test_loader = DataLoader(
+            test_ds,
+            batch_size=Config.batch_size,
+            shuffle=False,
+            pin_memory=True
+        )
+
+    return train_loader, test_loader
 
 
 def export_vocab():

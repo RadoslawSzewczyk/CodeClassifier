@@ -3,11 +3,11 @@ import torch.optim as optim
 import torch.nn as nn
 from model import CodeClassifier
 from data import create_data_loaders
-from config import Config
+from config import Config, debugLevel
 from utils import evaluate, prepare_data
 import logging
 
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=debugLevel)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 logging.debug(f"Using device: {device}")
 
@@ -29,26 +29,17 @@ def train_model():
         total = 0
         logging.debug(f"Epoch {epoch+1}/{Config.epochs}")
         for inputs, labels in train_loader:
-            print("a")
             inputs, labels = inputs.to(device), labels.to(device)
-            print("b")
             optimizer.zero_grad()
-            print("c")
             outputs = model(inputs)
-            print("d")
             loss = criterion(outputs, labels)
-            print("e")
             loss.backward()
-            print("f")
             optimizer.step()
-            print("g")
             total_loss += loss.item()
-            print("h")
             _, predicted = torch.max(outputs, 1)
             total += labels.size(0)
             correct += (predicted == labels).sum().item()
-            print("i")
-        
+            
         train_acc = correct / total
         test_acc = evaluate(model, test_loader)
         
@@ -57,13 +48,19 @@ def train_model():
         results.append(f"Test Accuracy: {test_acc:.4f}\n")
         results.append(f"Train Loss: {total_loss:.4f}\n")
         results.append(f"Model summary: {Config().prettyPrint()}\n")
-        print(f"Epoch {epoch+1}: Train Loss: {total_loss:.4f}, Train Acc: {train_acc:.4f}, Test Acc: {test_acc:.4f}")
         logging.info(f"Epoch {epoch+1}")
         logging.info(f"Train Acc: {train_acc:.4f}")
         logging.info(f"Test Acc: {test_acc:.4f}\n")
     
     with open(Config.results_filename, 'w') as f:
         f.write("\n".join(results))
-    logging.info("Training complete. Results saved to:", Config.results_filename)
     
     torch.save(model.state_dict(), 'code_classifier.pth')
+
+def test_model(max_lines):
+    _, test_files, vocab, label_to_idx = prepare_data()
+    _, test_loader = create_data_loaders([], test_files, vocab)
+    model = CodeClassifier(len(vocab), len(label_to_idx)).to(device)
+    model.load_state_dict(torch.load('code_classifier.pth', map_location=device))
+    acc = evaluate(model, test_loader)
+    print(f"Test accuracy on last {max_lines} lines/file: {acc:.4f}")

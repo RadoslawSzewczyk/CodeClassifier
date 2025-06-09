@@ -3,7 +3,7 @@ from datetime import datetime
 from multiprocessing import cpu_count
 import logging
 
-debugLevel = logging.DEBUG
+debugLevel = logging.INFO
 logging.basicConfig(level=debugLevel)
 class Config:
     data_dir = "trainingData"
@@ -14,7 +14,7 @@ class Config:
     sequence_length = 256
     embedding_dim = 256
     batch_size = 8
-    epochs = 10
+    epochs = 20
     min_line_length = 40
     file_chunk_size = 1024 * 1024
     max_workers = cpu_count() // 2

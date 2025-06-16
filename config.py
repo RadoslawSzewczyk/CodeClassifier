@@ -14,11 +14,11 @@ class Config:
     sequence_length = 256
     embedding_dim = 256
     batch_size = 8
-    epochs = 20
+    epochs = 30
     min_line_length = 40
     file_chunk_size = 1024 * 1024
     max_workers = cpu_count() // 2
-    train_lines = 1000
+    train_lines = 10000
     results_filename = datetime.now().strftime("%Y%m%d_%H%M%S") + "_results.txt"
     
     def prettyPrint(self):
